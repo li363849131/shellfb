@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/valorisa/ShellFromBrowser/internal/terminal"
+	"github.com/li363849131/shellfb/internal/terminal"
 )
 
 func TestSessionSpawnAndWrite(t *testing.T) {
@@ -15,33 +15,32 @@ func TestSessionSpawnAndWrite(t *testing.T) {
 	}
 	defer sess.Close()
 
-	// Write a command - use "echo hello" on Unix, or just send input on Windows
+	// Output now reaches clients through the broadcaster rather than a direct
+	// Read on the session, so subscribe the same way the WebSocket handler does.
+	// Register before writing, or the echoed output races the subscription.
+	ch, _ := sess.RegisterClient()
+	defer sess.UnregisterClient(ch)
+
 	_, err = sess.Write([]byte("echo hello\n"))
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
-	// Read output with timeout
-	buf := make([]byte, 4096)
 	var output bytes.Buffer
 	deadline := time.After(5 * time.Second)
 
 	for {
 		select {
 		case <-deadline:
-			if !bytes.Contains(output.Bytes(), []byte("hello")) {
-				t.Fatalf("timeout: output was %q", output.String())
+			t.Fatalf("timeout: output was %q", output.String())
+		case data, ok := <-ch:
+			if !ok {
+				t.Fatalf("session closed early: output was %q", output.String())
 			}
-			return
-		default:
-			n, _ := sess.Read(buf)
-			if n > 0 {
-				output.Write(buf[:n])
-				if bytes.Contains(output.Bytes(), []byte("hello")) {
-					return
-				}
+			output.Write(data)
+			if bytes.Contains(output.Bytes(), []byte("hello")) {
+				return
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }

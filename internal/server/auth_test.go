@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/valorisa/ShellFromBrowser/internal/auth"
-	"github.com/valorisa/ShellFromBrowser/internal/config"
-	"github.com/valorisa/ShellFromBrowser/internal/server"
+	"github.com/li363849131/shellfb/internal/auth"
+	"github.com/li363849131/shellfb/internal/config"
+	"github.com/li363849131/shellfb/internal/server"
 )
 
 func TestLoginEndpoint(t *testing.T) {

@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ShellFromBrowser</title>
-    <link rel="stylesheet" href="/static/css/xterm.css?v=20260729_v3">
-    <link rel="stylesheet" href="/static/css/app.css?v=20260729_v3">
+    <link rel="stylesheet" href="/static/css/xterm.css?v=20260731_v4">
+    <link rel="stylesheet" href="/static/css/app.css?v=20260731_v4">
 </head>
 <body>
     <div id="login-screen" style="display:none;">
@@ -30,6 +30,7 @@
             <button id="preview-toggle-btn" title="Toggle Image Preview" style="margin-right:4px; padding: 2px 10px; font-size: 12px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; cursor: pointer;">🖼️ 预览</button>
             <button id="filebrowser-btn" title="在新标签页打开 Web 网盘" style="margin-right:4px; padding: 2px 10px; font-size: 12px; background: #313244; color: #a6e3a1; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; font-weight: 500;">📁 网盘</button>
             <button id="vscode-btn" title="在新标签页打开 Web VS Code IDE" style="margin-right:4px; padding: 2px 10px; font-size: 12px; background: #313244; color: #fab387; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; font-weight: 500;">💻 VS Code</button>
+            <button id="ai-btn" title="AI 命令助手 (Ctrl+Shift+A)：说人话，转成 shell 命令" style="display:none; margin-right:4px; padding: 2px 10px; font-size: 12px; background: #313244; color: #a6e3a1; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; font-weight: 500;">🤖 AI</button>
             <button id="help-btn" title="帮助说明与快捷键" style="margin-right:8px; padding: 2px 10px; font-size: 12px; background: #313244; color: #89b4fa; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; font-weight: 500;">❓ 帮助</button>
         </div>
         <div id="main-layout" style="display:flex; flex:1; overflow:hidden; min-height:0;">
@@ -234,16 +235,45 @@
                     <button id="voice-send-btn" style="background:#89b4fa; color:#11111b; border:none; padding:5px 11px; border-radius:5px; font-size:11px; font-weight:600; cursor:pointer;">🚀 发送</button>
                 </div>
             </div>
+
+            <!-- AI 模式：说人话，由 AI 译成命令后填入终端，不自动执行 -->
+            <label id="voice-ai-row" style="display:none; align-items:center; gap:5px; color:#a6adc8; font-size:11px; cursor:pointer; user-select:none;" title="开启后：语音内容先由 AI 转成 shell 命令，填入终端等你确认回车">
+                <input type="checkbox" id="voice-ai-mode" style="cursor:pointer; margin:0;">
+                <span>🤖 AI 理解模式</span>
+                <span id="voice-ai-hint" style="color:#6c7086;">（命令需你按回车执行）</span>
+            </label>
         </div>
     </div>
 
-    <script src="/static/js/xterm.js?v=20260729_v3"></script>
-    <script src="/static/js/xterm-addon-fit.js?v=20260729_v3"></script>
-    <script src="/static/js/xterm-addon-web-links.js?v=20260729_v3"></script>
-    <script src="/static/js/sessions.js?v=20260729_v3"></script>
-    <script src="/static/js/jszip.min.js?v=20260729_v3"></script>
-    <script src="/static/js/docx-preview.min.js?v=20260729_v3"></script>
-    <script src="/static/js/xlsx.full.min.js?v=20260729_v3"></script>
-    <script src="/static/js/terminal.js?v=20260729_v3"></script>
+    <!-- AI 命令输入条：Ctrl+Shift+A 唤出，输入自然语言，回车翻译 -->
+    <div id="ai-bar" style="display:none; position:fixed; left:50%; transform:translateX(-50%); top:70px; z-index:99999; width:640px; max-width:calc(100vw - 32px); background:#1e1e2e; border:1px solid #585b70; border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.55); flex-direction:column; overflow:hidden;">
+        <div style="display:flex; align-items:center; gap:8px; padding:8px 10px; background:#181825;">
+            <span style="font-size:14px;">🤖</span>
+            <span style="color:#cdd6f4; font-size:12px; font-weight:600;">说人话，转成命令</span>
+            <span id="ai-bar-status" style="color:#6c7086; font-size:11px; margin-left:auto;"></span>
+            <button id="ai-bar-close" title="关闭 (Esc)" style="background:none; border:none; color:#a6adc8; font-size:15px; line-height:1; cursor:pointer; padding:2px 6px; border-radius:4px;">✕</button>
+        </div>
+        <div style="padding:9px; display:flex; flex-direction:column; gap:8px;">
+            <input id="ai-bar-input" type="text" autocomplete="off" placeholder="例如：找出当前目录下最大的三个文件" style="width:100%; box-sizing:border-box; background:#11111b; border:1px solid #313244; border-radius:6px; padding:9px; color:#cdd6f4; font-size:13px; outline:none;">
+            <div id="ai-bar-result" style="display:none; flex-direction:column; gap:7px;">
+                <code id="ai-bar-command" style="display:block; background:#11111b; border:1px solid #313244; border-radius:6px; padding:9px; color:#a6e3a1; font-size:12px; font-family:'JetBrains Mono',monospace; white-space:pre-wrap; word-break:break-all;"></code>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="ai-bar-explain" style="color:#a6adc8; font-size:11px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+                    <div style="display:flex; gap:6px; margin-left:auto; flex-shrink:0;">
+                        <button id="ai-bar-insert" title="填入终端，不执行" style="background:#89b4fa; color:#11111b; border:none; padding:5px 11px; border-radius:5px; font-size:11px; font-weight:600; cursor:pointer;">填入终端</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/xterm.js?v=20260731_v4"></script>
+    <script src="/static/js/xterm-addon-fit.js?v=20260731_v4"></script>
+    <script src="/static/js/xterm-addon-web-links.js?v=20260731_v4"></script>
+    <script src="/static/js/sessions.js?v=20260731_v4"></script>
+    <script src="/static/js/jszip.min.js?v=20260731_v4"></script>
+    <script src="/static/js/docx-preview.min.js?v=20260731_v4"></script>
+    <script src="/static/js/xlsx.full.min.js?v=20260731_v4"></script>
+    <script src="/static/js/terminal.js?v=20260731_v4"></script>
 </body>
 </html>

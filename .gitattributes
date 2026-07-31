@@ -22,6 +22,12 @@
 *.png binary
 *.jpg binary
 *.gif binary
+*.tar.gz binary
+
+# install.sh carries a base64 archive appended after a marker line. `text=auto`
+# would rewrite its line endings on checkout and corrupt the payload, so the
+# extraction would fail on a fresh clone.
+deploy/agy/install.sh -text
 
 # Linguist overrides - ensure GitHub detects this as a Go project
 *.js linguist-vendored

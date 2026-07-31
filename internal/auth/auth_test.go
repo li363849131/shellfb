@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/valorisa/ShellFromBrowser/internal/auth"
-	"github.com/valorisa/ShellFromBrowser/internal/config"
+	"github.com/li363849131/shellfb/internal/auth"
+	"github.com/li363849131/shellfb/internal/config"
 )
 
 func TestLocalAuth(t *testing.T) {

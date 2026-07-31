@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/gorilla/websocket"
-	"github.com/valorisa/ShellFromBrowser/internal/config"
-	"github.com/valorisa/ShellFromBrowser/internal/server"
+	"github.com/li363849131/shellfb/internal/config"
+	"github.com/li363849131/shellfb/internal/server"
 )
 
 func TestWebSocketEcho(t *testing.T) {

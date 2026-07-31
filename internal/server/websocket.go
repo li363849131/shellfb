@@ -4,14 +4,67 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/valorisa/ShellFromBrowser/internal/ssh"
-	"github.com/valorisa/ShellFromBrowser/internal/terminal"
+	"github.com/li363849131/shellfb/internal/ssh"
+	"github.com/li363849131/shellfb/internal/terminal"
 )
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+const (
+	// Proxies (Cloudflare tunnels in particular) drop connections that carry no
+	// traffic for ~100s. An idle terminal produces nothing, so without a
+	// heartbeat the socket dies silently: the browser keeps a CLOSING/CLOSED
+	// socket that swallows keystrokes and only a page reload recovers it.
+	pingInterval = 25 * time.Second
+	pongWait     = 70 * time.Second
+	writeWait    = 10 * time.Second
+)
+
+// connWriter serialises all writes to a websocket. gorilla/websocket permits
+// only one concurrent writer, and here the PTY pump, the ping ticker and the
+// error paths all write.
+type connWriter struct {
+	mu   sync.Mutex
+	conn *websocket.Conn
+}
+
+func (w *connWriter) write(msgType int, data []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.conn.SetWriteDeadline(time.Now().Add(writeWait))
+	return w.conn.WriteMessage(msgType, data)
+}
+
+// keepalive pings until done closes, so a dead peer is detected within pongWait
+// instead of hanging forever.
+func keepalive(w *connWriter, done <-chan struct{}) {
+	ticker := time.NewTicker(pingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			if err := w.write(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// readPump configures deadline handling so ReadMessage unblocks when the peer
+// goes away without a close frame.
+func readPump(conn *websocket.Conn) {
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
 }
 
 type resizeMsg struct {
@@ -28,6 +81,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	w2 := &connWriter{conn: conn}
+	readPump(conn)
+
 	username := "anonymous"
 	if s.authProv != nil {
 		token := r.URL.Query().Get("token")
@@ -43,20 +99,23 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if sessionID != "" {
 		sess, err = s.sessions.Get(sessionID)
 		if err != nil {
-			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"session not found"}`))
+			// The session was destroyed (possibly from another browser tab).
+			// Tell the client explicitly so it can drop its stale tab instead of
+			// silently reconnecting forever.
+			w2.write(websocket.TextMessage, []byte(`{"type":"error","code":"session_gone","message":"session not found"}`))
 			return
 		}
 	} else {
 		sess, err = s.sessions.Create(username, 80, 24)
 		if err != nil {
-			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"`+err.Error()+`"}`))
+			w2.write(websocket.TextMessage, []byte(`{"type":"error","message":"`+err.Error()+`"}`))
 			return
 		}
 	}
 
 	// Send session info
 	info, _ := json.Marshal(map[string]string{"type": "session", "id": sess.ID()})
-	conn.WriteMessage(websocket.TextMessage, info)
+	w2.write(websocket.TextMessage, info)
 
 	// Register client with session broadcaster and get history snapshot
 	ch, history := sess.RegisterClient()
@@ -64,7 +123,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Send history snapshot immediately so new client gets current screen & prompt
 	if len(history) > 0 {
-		if err := conn.WriteMessage(websocket.BinaryMessage, history); err != nil {
+		if err := w2.write(websocket.BinaryMessage, history); err != nil {
 			return
 		}
 	}
@@ -77,11 +136,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if data == nil {
 				return
 			}
-			if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+			if err := w2.write(websocket.BinaryMessage, data); err != nil {
 				return
 			}
 		}
 	}()
+
+	go keepalive(w2, done)
 
 	// WebSocket -> PTY
 	for {
@@ -108,12 +169,15 @@ func (s *Server) handleSSHWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	w2 := &connWriter{conn: conn}
+	readPump(conn)
+
 	target := r.URL.Query().Get("target")
 	password := r.URL.Query().Get("password")
 	keyFile := r.URL.Query().Get("key")
 
 	if target == "" {
-		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"target required"}`))
+		w2.write(websocket.TextMessage, []byte(`{"type":"error","message":"target required"}`))
 		return
 	}
 
@@ -125,10 +189,14 @@ func (s *Server) handleSSHWebSocket(w http.ResponseWriter, r *http.Request) {
 		Rows:     24,
 	})
 	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"`+err.Error()+`"}`))
+		w2.write(websocket.TextMessage, []byte(`{"type":"error","message":"`+err.Error()+`"}`))
 		return
 	}
 	defer sshSess.Close()
+
+	done := make(chan struct{})
+	defer close(done)
+	go keepalive(w2, done)
 
 	// SSH stdout -> WebSocket
 	go func() {
@@ -138,7 +206,9 @@ func (s *Server) handleSSHWebSocket(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return
 			}
-			conn.WriteMessage(websocket.BinaryMessage, buf[:n])
+			if err := w2.write(websocket.BinaryMessage, buf[:n]); err != nil {
+				return
+			}
 		}
 	}()
 

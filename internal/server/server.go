@@ -20,12 +20,13 @@ import (
 
 	"golang.org/x/crypto/acme/autocert"
 
-	"github.com/valorisa/ShellFromBrowser/internal/auth"
-	"github.com/valorisa/ShellFromBrowser/internal/config"
-	"github.com/valorisa/ShellFromBrowser/internal/recording"
-	"github.com/valorisa/ShellFromBrowser/internal/terminal"
-	"github.com/valorisa/ShellFromBrowser/internal/transfer"
-	"github.com/valorisa/ShellFromBrowser/web"
+	"github.com/li363849131/shellfb/internal/ai"
+	"github.com/li363849131/shellfb/internal/auth"
+	"github.com/li363849131/shellfb/internal/config"
+	"github.com/li363849131/shellfb/internal/recording"
+	"github.com/li363849131/shellfb/internal/terminal"
+	"github.com/li363849131/shellfb/internal/transfer"
+	"github.com/li363849131/shellfb/web"
 )
 
 type Server struct {
@@ -72,6 +73,14 @@ func New(addr string, cfg *config.Config) *Server {
 	player := recording.NewPlayer(recordingDir)
 	s.mux.HandleFunc("/api/recordings", s.authMiddleware(player.HandleList))
 	s.mux.HandleFunc("/api/recordings/get", s.authMiddleware(player.HandleGet))
+
+	// Natural-language -> shell command. The command is only *typed* into the
+	// terminal; the user still presses Enter, so a bad suggestion cannot run
+	// on its own.
+	aiHandler := ai.NewHandler()
+	aiLimiter := newRateLimiter(20, time.Minute)
+	s.mux.HandleFunc("/api/ai/status", s.authMiddleware(aiHandler.HandleStatus))
+	s.mux.HandleFunc("/api/ai/translate", s.authMiddleware(aiLimiter.Middleware(aiHandler.HandleTranslate)))
 
 	loginLimiter := newRateLimiter(5, time.Minute)
 	s.mux.HandleFunc("/api/login", loginLimiter.Middleware(s.handleLogin))

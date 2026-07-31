@@ -38,7 +38,15 @@ var SessionManager = (function () {
             return [];
         }
         sessions = await resp.json();
-        return sessions;
+        return sessions || [];
+    }
+
+    // Kill the session server-side. Closing a browser tab used to only drop the
+    // WebSocket, leaving the PTY alive and still listed by every other browser.
+    async function destroySession(id) {
+        if (!id) return;
+        await fetch("/api/sessions?id=" + encodeURIComponent(id) +
+            "&token=" + encodeURIComponent(token), { method: "DELETE" });
     }
 
     function setActive(id) {
@@ -52,6 +60,7 @@ var SessionManager = (function () {
     return {
         login: login,
         listSessions: listSessions,
+        destroySession: destroySession,
         getToken: getToken,
         clearToken: clearToken,
         setActive: setActive,

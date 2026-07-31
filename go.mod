@@ -1,4 +1,4 @@
-module github.com/valorisa/ShellFromBrowser
+module github.com/li363849131/shellfb
 
 go 1.26.3
 

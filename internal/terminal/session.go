@@ -3,7 +3,6 @@ package terminal
 import (
 	"io"
 	"sync"
-	"time"
 )
 
 type Session struct {
@@ -103,9 +102,6 @@ func (s *Session) Write(p []byte) (int, error) {
 		return 0, io.ErrClosedPipe
 	}
 	return s.writer.Write(p)
-}
-
-func (s *Session) SetReadDeadline(t time.Time) {
 }
 
 func (s *Session) Resize(cols, rows uint16) error {

@@ -3,7 +3,7 @@ package ssh_test
 import (
 	"testing"
 
-	sshclient "github.com/valorisa/ShellFromBrowser/internal/ssh"
+	sshclient "github.com/li363849131/shellfb/internal/ssh"
 )
 
 func TestParseTarget(t *testing.T) {

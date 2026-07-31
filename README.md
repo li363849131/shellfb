@@ -1,9 +1,9 @@
 # ShellFromBrowser
 
-[![CI](https://github.com/valorisa/ShellFromBrowser/actions/workflows/ci.yml/badge.svg)](https://github.com/valorisa/ShellFromBrowser/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/valorisa/ShellFromBrowser)](https://go.dev/)
+[![CI](https://github.com/li363849131/shellfb/actions/workflows/ci.yml/badge.svg)](https://github.com/li363849131/shellfb/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/li363849131/shellfb)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)](https://github.com/valorisa/ShellFromBrowser/releases)
+[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)](https://github.com/li363849131/shellfb/releases)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile)
 
 > 🇫🇷 **[Lire en français](README.fr.md)**
@@ -11,6 +11,8 @@
 **A network-traversing, web-based terminal emulator.** ShellFromBrowser works everywhere a browser can open a website — airports, train stations, corporate networks, anywhere. It uses standard HTTPS on port 443: no firewall can tell it apart from a regular web visit.
 
 A modern, cross-platform terminal emulator written in Go. Spiritual successor to [ShellInBox](https://code.google.com/archive/p/shellinabox/) — rebuilt from scratch with WebSocket, xterm.js, SSH client support, multi-sessions, file transfer, and session recording.
+
+> **Fork notice.** This is a fork of [valorisa/ShellFromBrowser](https://github.com/valorisa/ShellFromBrowser) (MIT). Added here: voice input, AI natural-language-to-command translation, WebSocket keepalive with auto-reconnect, and a one-shot deployment script. See [Additions in this fork](#additions-in-this-fork).
 
 ---
 
@@ -20,6 +22,9 @@ A modern, cross-platform terminal emulator written in Go. Spiritual successor to
 |---------|-------------|
 | **Browser-based terminal** | Full xterm.js emulation — 256 colors, Unicode, mouse support, clipboard |
 | **Multi-session tabs** | Open multiple terminal sessions in one browser window, switch between them |
+| **Voice input** | Dictate into the terminal — browser Web Speech API, or a local faster-whisper server for offline use |
+| **AI command help** | Describe what you want in plain language; the command is typed into the terminal for you to review and run |
+| **Resilient connection** | Server-side WebSocket ping every 25s plus client auto-reconnect, so idle sessions survive proxy timeouts |
 | **SSH client** | Connect to remote hosts directly from the browser (`user@host:port`) |
 | **Authentication** | JWT-based auth with bcrypt password hashing, configurable per-user |
 | **TLS/HTTPS** | Built-in TLS support — just provide cert and key paths |
@@ -43,8 +48,8 @@ A modern, cross-platform terminal emulator written in Go. Spiritual successor to
 The fastest way to try ShellFromBrowser. Works on Windows, macOS, and Linux — Go handles the cross-platform differences automatically.
 
 ```bash
-git clone https://github.com/valorisa/ShellFromBrowser.git
-cd ShellFromBrowser
+git clone https://github.com/li363849131/shellfb.git
+cd shellfb
 
 # Launch directly without installing (compiles and runs in one step)
 go run ./cmd/shellfb
@@ -59,7 +64,7 @@ Then open http://localhost:4200 in your browser. You should see an interactive t
 Installs the `shellfb` binary into your `$GOPATH/bin` (or `%GOPATH%\bin` on Windows), making it available system-wide.
 
 ```bash
-go install github.com/valorisa/ShellFromBrowser/cmd/shellfb@latest
+go install github.com/li363849131/shellfb/cmd/shellfb@latest
 
 # Run with defaults (no auth, port 4200)
 shellfb
@@ -81,8 +86,8 @@ Then open http://localhost:4200 (or your custom port) in your browser. Stop it w
 The default `docker-compose.yml` exposes ports 80/443 with auto-TLS — designed for deployment on restricted networks (airports, train stations, corporate firewalls) where only standard HTTPS traffic passes through.
 
 ```bash
-git clone https://github.com/valorisa/ShellFromBrowser.git
-cd ShellFromBrowser
+git clone https://github.com/li363849131/shellfb.git
+cd shellfb
 
 # Create your configuration
 cp config.example.yaml config.yaml
@@ -105,8 +110,8 @@ Open `https://your-domain.com` — the terminal is ready. To stop: `docker compo
 Compiles the binary into `./bin/shellfb`. Useful for development or packaging.
 
 ```bash
-git clone https://github.com/valorisa/ShellFromBrowser.git
-cd ShellFromBrowser
+git clone https://github.com/li363849131/shellfb.git
+cd shellfb
 
 # Build the binary
 make build
@@ -215,8 +220,56 @@ Parameters:
 | GET | `/api/download?file=X` | Yes | Download a file |
 | GET | `/api/recordings` | Yes | List recorded sessions |
 | GET | `/api/recordings/get?id=X` | Yes | Get recording data (asciicast v2) |
+| GET | `/api/ai/status` | Yes | Report whether AI translation is configured |
+| POST | `/api/ai/translate` | Yes | Translate natural language into a shell command |
+| POST | `/api/voice/transcribe` | Yes | Proxied to the local whisper server |
 | WS | `/ws` | Yes | Terminal WebSocket (local shell) |
 | WS | `/ws/ssh` | Yes | SSH WebSocket (remote host) |
+
+---
+
+## Additions in this fork
+
+### Voice input
+
+Two engines, selectable in the voice panel:
+
+- **Browser native** (Web Speech API) — lowest latency, needs network and a secure context (HTTPS or localhost).
+- **Local whisper** — offline CPU inference via [faster-whisper](https://github.com/SYSTRAN/faster-whisper). Run `deploy/whisper_server.py` (Flask, listens on `127.0.0.1:30022`); the terminal proxies `/api/voice/` to it.
+
+```bash
+pip3 install faster-whisper flask flask-cors
+python3 deploy/whisper_server.py     # WHISPER_MODEL=tiny by default
+```
+
+Recording requires a secure context. Over plain HTTP the panel opens but `getUserMedia` fails.
+
+### AI: natural language to command
+
+Press `Ctrl+Shift+A` (or click **🤖 AI**), type what you want, and get a command back:
+
+```
+找出当前目录下最大的三个文件
+  -> du -sh * | sort -rh | head -3
+```
+
+**The command is only typed into the terminal — you press Enter.** Suggestions that look destructive are highlighted in red and prefixed with a warning. Nothing executes on its own.
+
+Enable it by exporting an Anthropic credential before starting the server:
+
+```bash
+export ANTHROPIC_AUTH_TOKEN=sk-...        # or ANTHROPIC_API_KEY
+export ANTHROPIC_BASE_URL=https://...     # optional, for a gateway
+export SHELLFB_AI_MODEL=claude-sonnet-5   # optional, default claude-haiku-4-5-20251001
+```
+
+With no credential the AI controls stay hidden and everything else works normally. Requests are rate limited to 20/min per IP.
+
+### Connection resilience
+
+Idle terminals used to freeze behind proxies that drop quiet connections: the page looked fine but swallowed keystrokes until a reload. Now the server pings every 25s (`pongWait` 70s), dead clients are reaped, and the browser reconnects with exponential backoff — the PTY survives, so its scrollback is replayed on reconnect.
+
+Closing a tab also destroys the session server-side, and open browsers reconcile their tab list every 5s, so a session deleted in one window disappears from the others.
 
 ---
 
@@ -229,15 +282,18 @@ Parameters:
 - **No eval()**: No inline scripts, no dynamic code execution in frontend
 - **TLS**: Built-in HTTPS support — no reverse proxy required
 - **WebSocket auth**: All WebSocket connections require valid JWT token when auth is enabled
+- **AI commands are never auto-executed**: translated commands are typed into the terminal and wait for the user to press Enter
+- **AI credentials stay server-side**: the API key is read from the server's environment and never sent to the browser
 
 ---
 
 ## Project Structure
 
 ```
-ShellFromBrowser/
+shellfb/
 ├── cmd/shellfb/          # Entry point, CLI
 ├── internal/
+│   ├── ai/               # Natural language -> shell command (Anthropic API)
 │   ├── auth/             # JWT + bcrypt authentication
 │   ├── config/           # YAML configuration
 │   ├── recording/        # Asciicast v2 session recording
@@ -245,6 +301,8 @@ ShellFromBrowser/
 │   ├── ssh/              # SSH client wrapper
 │   ├── terminal/         # PTY session management (Unix + Windows)
 │   └── transfer/         # File upload/download
+├── deploy/
+│   └── whisper_server.py # Local faster-whisper transcription server
 ├── web/
 │   └── static/           # Embedded frontend (xterm.js, CSS, JS)
 ├── config.example.yaml   # Example configuration
@@ -253,8 +311,12 @@ ShellFromBrowser/
 └── Makefile              # Build automation
 ```
 
+> Frontend assets are compiled into the binary with `go:embed`. Editing anything under `web/static/` has no effect until you rebuild.
+
 ---
 
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 valorisa
+
+Fork maintained by [li363849131](https://github.com/li363849131). Original work by valorisa; the MIT terms and copyright notice above are unchanged.

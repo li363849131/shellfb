@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/valorisa/ShellFromBrowser/internal/transfer"
+	"github.com/li363849131/shellfb/internal/transfer"
 )
 
 func TestUpload(t *testing.T) {

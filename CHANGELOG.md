@@ -29,5 +29,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Actions CI with cross-platform testing and binary builds
 - Embedded static assets via go:embed (single binary distribution)
 
-[Unreleased]: https://github.com/valorisa/ShellFromBrowser/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/valorisa/ShellFromBrowser/releases/tag/v0.1.0
+[Unreleased]: https://github.com/li363849131/shellfb/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/li363849131/shellfb/releases/tag/v0.1.0

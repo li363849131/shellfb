@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/valorisa/ShellFromBrowser/internal/recording"
+	"github.com/li363849131/shellfb/internal/recording"
 )
 
 func TestRecorder(t *testing.T) {

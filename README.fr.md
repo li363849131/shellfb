@@ -1,9 +1,9 @@
 # ShellFromBrowser
 
-[![CI](https://github.com/valorisa/ShellFromBrowser/actions/workflows/ci.yml/badge.svg)](https://github.com/valorisa/ShellFromBrowser/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/valorisa/ShellFromBrowser)](https://go.dev/)
+[![CI](https://github.com/li363849131/shellfb/actions/workflows/ci.yml/badge.svg)](https://github.com/li363849131/shellfb/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/li363849131/shellfb)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)](https://github.com/valorisa/ShellFromBrowser/releases)
+[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)](https://github.com/li363849131/shellfb/releases)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile)
 
 > 🇺🇸 **[Read in English](README.md)**
@@ -43,8 +43,8 @@ Un émulateur de terminal web moderne et multiplateforme écrit en Go. Successeu
 La manière la plus rapide d'essayer ShellFromBrowser. Fonctionne sur Windows, macOS et Linux — Go gère les différences cross-platform automatiquement.
 
 ```bash
-git clone https://github.com/valorisa/ShellFromBrowser.git
-cd ShellFromBrowser
+git clone https://github.com/li363849131/shellfb.git
+cd shellfb
 
 # Lancer directement sans installer (compile et exécute en une seule étape)
 go run ./cmd/shellfb
@@ -59,7 +59,7 @@ Puis ouvrir http://localhost:4200 dans votre navigateur. Vous devriez voir un te
 Installe le binaire `shellfb` dans votre `$GOPATH/bin` (ou `%GOPATH%\bin` sous Windows), le rendant disponible partout sur le système.
 
 ```bash
-go install github.com/valorisa/ShellFromBrowser/cmd/shellfb@latest
+go install github.com/li363849131/shellfb/cmd/shellfb@latest
 
 # Lancer avec les paramètres par défaut (sans auth, port 4200)
 shellfb
@@ -81,8 +81,8 @@ Puis ouvrir http://localhost:4200 (ou votre port personnalisé) dans votre navig
 Le `docker-compose.yml` par défaut expose les ports 80/443 avec auto-TLS — conçu pour le déploiement en réseaux contraints (aéroports, gares, réseaux d'entreprise) où seul le trafic HTTPS standard passe les pare-feu.
 
 ```bash
-git clone https://github.com/valorisa/ShellFromBrowser.git
-cd ShellFromBrowser
+git clone https://github.com/li363849131/shellfb.git
+cd shellfb
 
 # Créer votre configuration
 cp config.example.yaml config.yaml
@@ -105,8 +105,8 @@ Ouvrir `https://votre-domaine.com` — le terminal est prêt. Pour arrêter : `d
 Compile le binaire dans `./bin/shellfb`. Utile pour le développement ou le packaging.
 
 ```bash
-git clone https://github.com/valorisa/ShellFromBrowser.git
-cd ShellFromBrowser
+git clone https://github.com/li363849131/shellfb.git
+cd shellfb
 
 # Compiler le binaire
 make build

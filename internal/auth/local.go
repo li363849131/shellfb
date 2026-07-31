@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/valorisa/ShellFromBrowser/internal/config"
+	"github.com/li363849131/shellfb/internal/config"
 )
 
 type LocalProvider struct {

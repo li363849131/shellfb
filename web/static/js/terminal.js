@@ -23,56 +23,120 @@
         term.loadAddon(fitAddon);
         term.loadAddon(webLinksAddon);
 
-        var protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        var wsUrl = protocol + "//" + window.location.host + "/ws?token=" +
-            encodeURIComponent(SessionManager.getToken());
-        if (sessionId) wsUrl += "&session=" + encodeURIComponent(sessionId);
-
-        var ws = new WebSocket(wsUrl);
-        ws.binaryType = "arraybuffer";
-
-        ws.onopen = function () {
-            var dims = JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows });
-            ws.send(dims);
-            setStatus("Connected");
+        var entry = {
+            term: term,
+            fitAddon: fitAddon,
+            ws: null,
+            sessionId: sessionId || null,
+            closing: false,   // set by closeTab: suppresses reconnect
+            retry: 0,
+            retryTimer: null,
+            gone: false,      // server said the session no longer exists
         };
+        terminals[id] = entry;
 
-        ws.onmessage = function (event) {
-            if (event.data instanceof ArrayBuffer) {
-                term.write(new Uint8Array(event.data));
-            } else {
-                try {
-                    var msg = JSON.parse(event.data);
-                    if (msg.type === "session") {
-                        terminals[id].sessionId = msg.id;
-                        SessionManager.setActive(msg.id);
-                        updateSessionInfo();
-                    }
-                } catch (e) {
-                    term.write(event.data);
-                }
-            }
-        };
-
-        ws.onclose = function () { setStatus("Disconnected"); };
-
+        // Input goes through the *current* socket. Reconnecting replaces
+        // entry.ws, so these handlers must not capture a socket in a closure.
         term.onData(function (data) {
-            if (activeTermId === id && ws.readyState === WebSocket.OPEN) {
-                ws.send(data);
-            }
+            if (activeTermId !== id) return;
+            var ws = entry.ws;
+            if (ws && ws.readyState === WebSocket.OPEN) ws.send(data);
         });
 
         term.onResize(function (size) {
-            if (ws.readyState === WebSocket.OPEN) {
+            var ws = entry.ws;
+            if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: "resize", cols: size.cols, rows: size.rows }));
             }
         });
 
-        terminals[id] = { term: term, fitAddon: fitAddon, ws: ws, sessionId: sessionId || null };
+        connect(id);
         addTab(id);
         switchTab(id);
 
         return id;
+    }
+
+    // Open (or reopen) the WebSocket for a terminal. An idle socket killed by a
+    // proxy used to leave the page looking fine while silently eating every
+    // keystroke; now the socket is rebuilt automatically and the PTY history
+    // replay from the server restores the screen.
+    function connect(id) {
+        var entry = terminals[id];
+        if (!entry || entry.closing || entry.gone) return;
+
+        var protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        var wsUrl = protocol + "//" + window.location.host + "/ws?token=" +
+            encodeURIComponent(SessionManager.getToken());
+        if (entry.sessionId) wsUrl += "&session=" + encodeURIComponent(entry.sessionId);
+
+        var ws;
+        try {
+            ws = new WebSocket(wsUrl);
+        } catch (e) {
+            scheduleReconnect(id);
+            return;
+        }
+        ws.binaryType = "arraybuffer";
+        entry.ws = ws;
+
+        ws.onopen = function () {
+            entry.retry = 0;
+            // A reconnect replays history, so clear first to avoid a duplicate
+            // copy of the screen stacking under the old one.
+            if (entry.everOpened) entry.term.reset();
+            entry.everOpened = true;
+            ws.send(JSON.stringify({ type: "resize", cols: entry.term.cols, rows: entry.term.rows }));
+            if (activeTermId === id) setStatus("Connected");
+        };
+
+        ws.onmessage = function (event) {
+            if (event.data instanceof ArrayBuffer) {
+                entry.term.write(new Uint8Array(event.data));
+                return;
+            }
+            try {
+                var msg = JSON.parse(event.data);
+                if (msg.type === "session") {
+                    entry.sessionId = msg.id;
+                    SessionManager.setActive(msg.id);
+                    updateSessionInfo();
+                } else if (msg.type === "error" && msg.code === "session_gone") {
+                    // Destroyed elsewhere. Don't fight it: drop the tab.
+                    entry.gone = true;
+                    entry.term.write("\r\n\x1b[33m[会话已在其他位置被关闭]\x1b[0m\r\n");
+                    closeTab(id, { destroyRemote: false });
+                } else if (msg.type === "error") {
+                    entry.term.write("\r\n\x1b[31m[" + (msg.message || "error") + "]\x1b[0m\r\n");
+                }
+            } catch (e) {
+                entry.term.write(event.data);
+            }
+        };
+
+        ws.onclose = function () {
+            if (entry.ws === ws) entry.ws = null;
+            if (entry.closing || entry.gone) return;
+            scheduleReconnect(id);
+        };
+
+        ws.onerror = function () { /* onclose always follows; handle it there */ };
+    }
+
+    function scheduleReconnect(id) {
+        var entry = terminals[id];
+        if (!entry || entry.closing || entry.gone) return;
+        if (entry.retryTimer) return;
+
+        entry.retry++;
+        var delay = Math.min(10000, 500 * Math.pow(2, Math.min(entry.retry - 1, 5)));
+        if (activeTermId === id) {
+            setStatus("Reconnecting… (" + entry.retry + ")");
+        }
+        entry.retryTimer = setTimeout(function () {
+            entry.retryTimer = null;
+            connect(id);
+        }, delay);
     }
 
     function addTab(id) {
@@ -80,11 +144,16 @@
         var tab = document.createElement("div");
         tab.className = "tab";
         tab.dataset.id = id;
-        tab.textContent = "Session " + (Object.keys(terminals).length);
+
+        var label = document.createElement("span");
+        label.className = "tab-label";
+        label.textContent = "Session " + (Object.keys(terminals).length);
+        tab.appendChild(label);
 
         var closeBtn = document.createElement("span");
         closeBtn.className = "tab-close";
         closeBtn.textContent = "×";
+        closeBtn.title = "关闭并销毁该会话";
         closeBtn.onclick = function (e) {
             e.stopPropagation();
             closeTab(id);
@@ -127,11 +196,20 @@
         updateSessionInfo();
     }
 
-    function closeTab(id) {
+    function closeTab(id, opts) {
+        var destroyRemote = !opts || opts.destroyRemote !== false;
         var t = terminals[id];
         if (t) {
-            t.ws.close();
-            t.term.dispose();
+            t.closing = true;
+            if (t.retryTimer) { clearTimeout(t.retryTimer); t.retryTimer = null; }
+            // Closing a tab means killing the session, not just this view.
+            // Without the DELETE the PTY stayed alive and every other browser
+            // kept listing it.
+            if (destroyRemote && t.sessionId) {
+                try { SessionManager.destroySession(t.sessionId); } catch (e) {}
+            }
+            if (t.ws) { try { t.ws.close(); } catch (e) {} }
+            try { t.term.dispose(); } catch (e) {}
             delete terminals[id];
         }
         var tabEl = document.querySelector('.tab[data-id="' + id + '"]');
@@ -139,7 +217,56 @@
 
         var remaining = Object.keys(terminals);
         if (remaining.length > 0) {
-            switchTab(remaining[remaining.length - 1]);
+            if (activeTermId === id) switchTab(remaining[remaining.length - 1]);
+        } else {
+            activeTermId = null;
+        }
+        renumberTabs();
+        updateSessionInfo();
+    }
+
+    // Tab labels are positional, so they have to be recomputed after a close;
+    // otherwise closing "Session 1" leaves a lone tab still labelled "Session 2".
+    function renumberTabs() {
+        var i = 1;
+        document.querySelectorAll(".tab").forEach(function (el) {
+            var label = el.querySelector(".tab-label");
+            if (label) label.textContent = "Session " + (i++);
+        });
+    }
+
+    // Sessions can be created or destroyed from another browser. Poll the
+    // server and reconcile: drop tabs whose session is gone, add tabs for
+    // sessions we don't have yet.
+    async function syncSessions() {
+        var remote;
+        try {
+            remote = await SessionManager.listSessions();
+        } catch (e) {
+            return;
+        }
+        if (!remote) return;
+
+        var remoteIds = {};
+        for (var i = 0; i < remote.length; i++) remoteIds[remote[i].ID] = true;
+
+        for (var tid in terminals) {
+            var t = terminals[tid];
+            if (!t || t.closing || !t.sessionId) continue;
+            if (!remoteIds[t.sessionId]) {
+                t.gone = true;
+                closeTab(tid, { destroyRemote: false });
+            }
+        }
+
+        var localIds = {};
+        for (var tid2 in terminals) {
+            if (terminals[tid2] && terminals[tid2].sessionId) {
+                localIds[terminals[tid2].sessionId] = true;
+            }
+        }
+        for (var j = 0; j < remote.length; j++) {
+            if (!localIds[remote[j].ID]) createTerminal(remote[j].ID);
         }
     }
 
@@ -216,10 +343,208 @@
         setupHelpModal();
         setupExternalButtons();
         setupVoiceInput();
+        setupAIInput();
+
+        // Reconcile with other browsers every few seconds, and immediately when
+        // this tab regains focus (the common case: you deleted a session
+        // elsewhere and switched back).
+        setInterval(syncSessions, 5000);
+        document.addEventListener("visibilitychange", function () {
+            if (!document.hidden) syncSessions();
+        });
 
         window.addEventListener("resize", function () {
             if (activeTermId && terminals[activeTermId]) {
                 terminals[activeTermId].fitAddon.fit();
+            }
+        });
+    }
+
+    // ---------------- AI: natural language -> shell command ----------------
+    //
+    // The translated command is only *typed* into the terminal. The user presses
+    // Enter. That is deliberate: a model can misread an instruction, and an
+    // auto-executed `rm` cannot be taken back.
+
+    var aiAvailable = false;   // server has credentials configured
+
+    function aiEnabled() {
+        var cb = document.getElementById("voice-ai-mode");
+        return aiAvailable && !!(cb && cb.checked);
+    }
+
+    function looksDangerous(cmd, explain) {
+        if (explain && explain.indexOf("危险") === 0) return true;
+        return /(^|[\s;&|])(rm|dd|mkfs|shred|fdisk|parted)\s|--no-preserve-root|chmod\s+-R|chown\s+-R|kill\s+-9|>\s*\/(etc|boot|dev|sys)\b|\bmv\b[^|;]*\s\/(etc|boot|dev|sys)\b/.test(cmd);
+    }
+
+    // Type text into the terminal without submitting it.
+    function typeIntoTerminal(text) {
+        if (!activeTermId || !terminals[activeTermId]) {
+            alert("请先连接或选中终端标签页");
+            return false;
+        }
+        var ws = terminals[activeTermId].ws;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            alert("终端未连接，请稍候重试");
+            return false;
+        }
+        ws.send(text);
+        focusActiveTerm();
+        return true;
+    }
+
+    function focusActiveTerm() {
+        if (activeTermId && terminals[activeTermId] && terminals[activeTermId].term) {
+            try { terminals[activeTermId].term.focus(); } catch (e) {}
+        }
+    }
+
+    async function aiTranslate(text) {
+        var resp = await fetch("/api/ai/translate?token=" +
+            encodeURIComponent(SessionManager.getToken()), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: text, os: navigator.platform || "" }),
+        });
+        var data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        return data;
+    }
+
+    // Used by the voice panel when AI mode is on.
+    function translateAndSend(text) {
+        aiTranslate(text).then(function (data) {
+            if (!data.command) {
+                alert("AI 未能转成命令：" + (data.explain || "请说得更具体一些"));
+                return;
+            }
+            showAIBar();
+            renderAIResult(data);
+        }).catch(function (err) {
+            alert("AI 转换失败: " + err.message);
+        });
+    }
+
+    function showAIBar() {
+        var bar = document.getElementById("ai-bar");
+        if (!bar) return;
+        bar.style.display = "flex";
+        var input = document.getElementById("ai-bar-input");
+        if (input) { input.focus(); input.select(); }
+    }
+
+    function hideAIBar() {
+        var bar = document.getElementById("ai-bar");
+        if (bar) bar.style.display = "none";
+        focusActiveTerm();
+    }
+
+    function renderAIResult(data) {
+        var box = document.getElementById("ai-bar-result");
+        var cmdEl = document.getElementById("ai-bar-command");
+        var expEl = document.getElementById("ai-bar-explain");
+        if (!box || !cmdEl) return;
+
+        cmdEl.textContent = data.command;
+        var danger = looksDangerous(data.command, data.explain);
+        cmdEl.style.color = danger ? "#f38ba8" : "#a6e3a1";
+        cmdEl.style.borderColor = danger ? "#f38ba8" : "#313244";
+        if (expEl) {
+            expEl.textContent = (danger ? "⚠️ " : "") + (data.explain || "");
+            expEl.style.color = danger ? "#f38ba8" : "#a6adc8";
+        }
+        box.style.display = "flex";
+        box.dataset.command = data.command;
+    }
+
+    function setupAIInput() {
+        var btn = document.getElementById("ai-btn");
+        var bar = document.getElementById("ai-bar");
+        var input = document.getElementById("ai-bar-input");
+        var closeBtn = document.getElementById("ai-bar-close");
+        var insertBtn = document.getElementById("ai-bar-insert");
+        var statusEl = document.getElementById("ai-bar-status");
+        var resultBox = document.getElementById("ai-bar-result");
+        var aiRow = document.getElementById("voice-ai-row");
+        if (!bar || !input) return;
+
+        // Hide the controls entirely when the server has no API key, rather than
+        // offering a button that always errors.
+        fetch("/api/ai/status?token=" + encodeURIComponent(SessionManager.getToken()))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                aiAvailable = !!(data && data.enabled);
+                if (aiAvailable) {
+                    if (btn) btn.style.display = "";
+                    if (aiRow) aiRow.style.display = "flex";
+                }
+            })
+            .catch(function () { /* leave AI hidden */ });
+
+        function setBusy(busy, msg) {
+            if (statusEl) statusEl.textContent = msg || "";
+            input.disabled = busy;
+        }
+
+        function run() {
+            var text = input.value.trim();
+            if (!text) return;
+            if (resultBox) resultBox.style.display = "none";
+            setBusy(true, "转换中…");
+            aiTranslate(text).then(function (data) {
+                setBusy(false, "");
+                if (!data.command) {
+                    if (statusEl) statusEl.textContent = data.explain || "无法转成命令";
+                    return;
+                }
+                renderAIResult(data);
+            }).catch(function (err) {
+                setBusy(false, err.message);
+            });
+        }
+
+        input.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                // Enter in the *result* state inserts; otherwise it translates.
+                if (resultBox && resultBox.style.display === "flex" && resultBox.dataset.command) {
+                    insert();
+                } else {
+                    run();
+                }
+            } else if (e.key === "Escape") {
+                e.stopPropagation();
+                hideAIBar();
+            } else if (resultBox) {
+                // Editing the request invalidates the previous answer.
+                resultBox.style.display = "none";
+                resultBox.dataset.command = "";
+            }
+        });
+
+        function insert() {
+            var cmd = resultBox ? resultBox.dataset.command : "";
+            if (!cmd) return;
+            if (typeIntoTerminal(cmd)) {
+                hideAIBar();
+                input.value = "";
+                if (resultBox) { resultBox.style.display = "none"; resultBox.dataset.command = ""; }
+            }
+        }
+
+        if (insertBtn) insertBtn.addEventListener("click", insert);
+        if (closeBtn) closeBtn.addEventListener("click", hideAIBar);
+        if (btn) btn.addEventListener("click", function () {
+            if (bar.style.display === "flex") { hideAIBar(); return; }
+            showAIBar();
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.ctrlKey && e.shiftKey && (e.key === "A" || e.key === "a")) {
+                e.preventDefault();
+                if (!aiAvailable) return;
+                if (bar.style.display === "flex") hideAIBar(); else showAIBar();
             }
         });
     }
@@ -1332,13 +1657,23 @@
         }
 
         // Called after the text is handed to the terminal (auto-send / 发送 / 清除).
-        function consumeText() {
+        //
+        // `sentInterim` means the dispatched text included the in-progress
+        // utterance. Interim text must be cleared either way -- keeping it made
+        // render() paste the previous sentence straight back into the textarea,
+        // so a second dictation always started with stale content. But if it was
+        // already sent we must also swallow its eventual final result, or the
+        // same words reach the terminal twice.
+        function consumeText(sentInterim) {
             if (mode === 'native') {
                 natCarry = '';
                 natFinal = '';
-                // Deliberately keep natInterim: the utterance may still be in
-                // flight. Marking it consumed is what previously made the second
-                // dictation emit nothing at all.
+                // Chrome reports results cumulatively, so onNativeResult skips
+                // the first natConsumed finals when rebuilding the text.
+                natConsumed = (sentInterim && natInterim.trim())
+                    ? natFinalCount + 1
+                    : natFinalCount;
+                natInterim = '';
             } else {
                 srvText = '';
             }
@@ -1466,6 +1801,23 @@
                 : "正在倾听中... (本机 Whisper)", "#f38ba8");
         }
 
+        // Single exit point for "this text is done, hand it over and reset".
+        // Whether the text still carried an interim tail decides if that tail's
+        // final result has to be swallowed, so the two must be decided together.
+        //
+        // With AI mode on the text goes to the model instead of the shell, and
+        // the resulting command lands in the review bar for the user to confirm.
+        function dispatchText(text) {
+            var sentInterim = (mode === 'native') && !!natInterim.trim() &&
+                text.indexOf(natInterim.trim()) !== -1;
+            if (aiEnabled()) {
+                translateAndSend(text);
+            } else {
+                sendToTerminal(text, true);
+            }
+            consumeText(sentInterim);
+        }
+
         // Only (re)arm the timer when the text actually grew. Re-arming on every
         // identical poll is what previously kept auto-send from ever firing.
         function scheduleAutoSend(text) {
@@ -1485,9 +1837,7 @@
                     scheduleAutoSend(out);
                     return;
                 }
-                sendToTerminal(out, true);
-                natConsumed = natFinalCount;
-                consumeText();
+                dispatchText(out);
             }, AUTOSEND_MS);
         }
 
@@ -1891,18 +2241,16 @@
         });
 
         clearBtn.addEventListener("click", function () {
-            natConsumed = natFinalCount;
-            consumeText();
-            natInterim = '';
+            // Nothing was sent, so the interim tail's final result is unwanted
+            // too -- treat it as consumed.
+            consumeText(true);
             focusTerminal();
         });
 
         sendBtn.addEventListener("click", function () {
             var text = transcriptText.value.trim();
             if (!text) return;
-            sendToTerminal(text, true);
-            natConsumed = natFinalCount;
-            consumeText();
+            dispatchText(text);
             focusTerminal();
         });
 

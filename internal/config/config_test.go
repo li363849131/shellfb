@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/valorisa/ShellFromBrowser/internal/config"
+	"github.com/li363849131/shellfb/internal/config"
 )
 
 func TestLoadConfig(t *testing.T) {
