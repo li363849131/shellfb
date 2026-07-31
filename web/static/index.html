@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShellFromBrowser</title>
+    <link rel="stylesheet" href="/static/css/xterm.css?v=20260729_v3">
+    <link rel="stylesheet" href="/static/css/app.css?v=20260729_v3">
+</head>
+<body>
+    <div id="login-screen" style="display:none;">
+        <div class="login-box">
+            <h1>ShellFromBrowser</h1>
+            <form id="login-form">
+                <input type="text" id="username" placeholder="Username" autocomplete="username">
+                <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+                <button type="submit">Connect</button>
+                <div id="login-error" class="error"></div>
+            </form>
+        </div>
+    </div>
+
+    <div id="app" style="display:none;">
+        <div id="tab-bar">
+            <div id="tabs"></div>
+            <button id="new-tab" title="New session">+</button>
+            <input type="file" id="file-upload-input" style="display:none;" multiple>
+            <button id="upload-btn" title="Upload Image or File" style="margin-left:auto; margin-right:4px; padding: 2px 10px; font-size: 12px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; cursor: pointer;">📷 上传/拖拽</button>
+            <button id="voice-btn" title="语音开发输入 (支持手机/电脑)" onclick="if(window.openVoiceModal){window.openVoiceModal();}else{alert('语音功能尚未初始化，请刷新页面。若反复出现，请检查浏览器控制台报错。');}" style="margin-right:4px; padding: 2px 10px; font-size: 12px; background: #313244; color: #f38ba8; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; font-weight: 500;">🎤 语音</button>
+            <button id="preview-toggle-btn" title="Toggle Image Preview" style="margin-right:4px; padding: 2px 10px; font-size: 12px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; cursor: pointer;">🖼️ 预览</button>
+            <button id="filebrowser-btn" title="在新标签页打开 Web 网盘" style="margin-right:4px; padding: 2px 10px; font-size: 12px; background: #313244; color: #a6e3a1; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; font-weight: 500;">📁 网盘</button>
+            <button id="vscode-btn" title="在新标签页打开 Web VS Code IDE" style="margin-right:4px; padding: 2px 10px; font-size: 12px; background: #313244; color: #fab387; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; font-weight: 500;">💻 VS Code</button>
+            <button id="help-btn" title="帮助说明与快捷键" style="margin-right:8px; padding: 2px 10px; font-size: 12px; background: #313244; color: #89b4fa; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; font-weight: 500;">❓ 帮助</button>
+        </div>
+        <div id="main-layout" style="display:flex; flex:1; overflow:hidden; min-height:0;">
+            <div id="terminal-container" style="flex:1; min-width:0; overflow:hidden;">
+                <div id="terminal"></div>
+            </div>
+            <!-- 面板宽度拖拽手柄 -->
+            <div id="panel-resize-handle" style="display:none; width:5px; cursor:col-resize; background:#1e1e2e; flex-shrink:0; transition:background 0.15s;" title="拖拽调整面板宽度"></div>
+            <!-- 文件浏览器 + 预览面板 -->
+            <div id="preview-panel" style="display:none; width:440px; min-width:180px; flex-direction:column; background:#181825; overflow:hidden; flex-shrink:0;">
+                <!-- 面板标题栏 -->
+                <div style="display:flex; align-items:center; padding:0 8px; background:#1e1e2e; border-bottom:1px solid #313244; flex-shrink:0; height:36px; gap:4px;">
+                    <span id="file-browser-title" style="color:#89b4fa; font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">📁 /root</span>
+                    <span id="file-count-badge" style="color:#6c7086; font-size:11px; margin-left:2px;"></span>
+                    <div style="flex:1;"></div>
+                    <button id="preview-refresh-btn" title="刷新列表" style="font-size:13px; padding:1px 7px; background:#313244; color:#a6adc8; border:1px solid #45475a; border-radius:4px; cursor:pointer;">↻</button>
+                    <button id="preview-close-btn" title="关闭面板" style="font-size:15px; background:none; border:none; color:#6c7086; cursor:pointer; padding:0 4px; line-height:1;">✕</button>
+                </div>
+                <!-- 文件列表区域（高度可拖拽） -->
+                <div id="file-browser-section" style="height:220px; min-height:60px; overflow-y:auto; flex-shrink:0; border-bottom:1px solid #313244;">
+                    <div id="file-list" style="padding:4px 4px 4px 4px;"></div>
+                </div>
+                <!-- 文件列表/预览区分隔线（可拖拽） -->
+                <div id="content-resize-handle" style="height:5px; cursor:row-resize; background:#313244; flex-shrink:0; transition:background 0.15s;" title="拖拽调整预览区大小"></div>
+                <!-- 预览内容区 -->
+                <div id="preview-content-area" style="flex:1; overflow:hidden; display:flex; flex-direction:column; min-height:0;">
+                    <div id="preview-content-header" style="display:none; align-items:center; padding:4px 10px; background:#1e1e2e; border-bottom:1px solid #313244; flex-shrink:0; gap:8px; min-height:28px;">
+                        <span id="preview-content-filename" style="color:#cdd6f4; font-size:11px; font-family:'JetBrains Mono',monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;"></span>
+                        <button id="preview-edit-btn" style="display:none; color:#a6e3a1; font-size:11px; background:#313244; border:1px solid #45475a; border-radius:4px; padding:1px 7px; cursor:pointer; flex-shrink:0;">✏️ 编辑</button>
+                        <a id="preview-content-openlink" href="#" target="_blank" style="color:#89b4fa; font-size:11px; text-decoration:none; flex-shrink:0; white-space:nowrap;">↗ 新标签</a>
+                    </div>
+                    <div id="preview-content" style="flex:1; overflow:auto; display:flex; align-items:center; justify-content:center; min-height:0; background:#11111b;">
+                        <div style="color:#585b70; font-size:13px; text-align:center; line-height:1.8;">
+                            <div style="font-size:36px; margin-bottom:8px;">📂</div>
+                            点击上方文件在此预览
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="status-bar">
+            <span id="session-info"></span>
+            <span id="connection-status">Disconnected</span>
+        </div>
+    </div>
+
+    <!-- 上传进度条 -->
+    <div id="upload-progress-container" style="display:none; position:fixed; bottom:24px; right:24px; width:300px; background:#313244; border:1px solid #585b70; border-radius:10px; padding:14px 16px; z-index:9999; box-shadow:0 8px 32px rgba(0,0,0,0.5); font-family:'JetBrains Mono','Fira Code',monospace;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <span id="upload-filename" style="color:#cdd6f4; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:210px;">filename.txt</span>
+            <span id="upload-percent" style="color:#89b4fa; font-size:12px; font-weight:bold; flex-shrink:0; margin-left:8px;">0%</span>
+        </div>
+        <div style="background:#1e1e2e; border-radius:6px; height:8px; overflow:hidden;">
+            <div id="upload-bar" style="background:linear-gradient(90deg,#89b4fa,#cba6f7); height:100%; width:0%; transition:width 0.15s ease; border-radius:6px;"></div>
+        </div>
+        <div id="upload-status" style="color:#89b4fa; font-size:11px; margin-top:8px;">上传中...</div>
+        <div style="color:#6c7086; font-size:10px; margin-top:4px;">提示: Ctrl+Shift+V 粘贴文件</div>
+    </div>
+
+    <!-- 帮助说明与快捷键 Modal 弹窗 -->
+    <div id="help-modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.65); backdrop-filter:blur(3px); z-index:99999; align-items:center; justify-content:center;">
+        <div style="background:#1e1e2e; border:1px solid #45475a; border-radius:12px; width:680px; max-width:92vw; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 12px 32px rgba(0,0,0,0.5); overflow:hidden;">
+            <!-- 弹窗 Header -->
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:#181825; border-bottom:1px solid #313244;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:18px;">💡</span>
+                    <span style="color:#cdd6f4; font-size:15px; font-weight:600;">ShellFromBrowser 使用帮助 & 快捷键指南</span>
+                </div>
+                <button id="help-modal-close" style="background:none; border:none; color:#a6adc8; font-size:18px; cursor:pointer; padding:2px 8px; border-radius:4px; line-height:1;" title="关闭 (Esc)">✕</button>
+            </div>
+            <!-- 弹窗 Body -->
+            <div style="padding:20px; overflow-y:auto; flex:1; font-size:13px; line-height:1.6; color:#cdd6f4;">
+                
+                <!-- 快捷键卡片 -->
+                <div style="margin-bottom:20px;">
+                    <div style="color:#89b4fa; font-size:14px; font-weight:600; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+                        <span>⌨️</span> 常用快捷键 (Shortcuts)
+                    </div>
+                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:10px;">
+                        <div style="background:#252538; padding:10px 12px; border-radius:8px; border:1px solid #313244;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-weight:600; color:#a6e3a1;">粘贴文件 / 截图上传</span>
+                                <kbd style="background:#45475a; color:#f5e0dc; padding:2px 6px; border-radius:4px; font-size:11px; font-family:monospace;">Ctrl + V</kbd>
+                            </div>
+                            <div style="color:#a6adc8; font-size:11px; margin-top:4px;">从系统剪贴板直接粘贴图片或文件自动触发上传。</div>
+                        </div>
+                        <div style="background:#252538; padding:10px 12px; border-radius:8px; border:1px solid #313244;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-weight:600; color:#a6e3a1;">终端纯文本粘贴</span>
+                                <kbd style="background:#45475a; color:#f5e0dc; padding:2px 6px; border-radius:4px; font-size:11px; font-family:monospace;">Ctrl + Shift + V</kbd>
+                            </div>
+                            <div style="color:#a6adc8; font-size:11px; margin-top:4px;">将剪贴板文本原样粘贴到终端命令行中。</div>
+                        </div>
+                        <div style="background:#252538; padding:10px 12px; border-radius:8px; border:1px solid #313244;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-weight:600; color:#a6e3a1;">在线编辑器保存文件</span>
+                                <kbd style="background:#45475a; color:#f5e0dc; padding:2px 6px; border-radius:4px; font-size:11px; font-family:monospace;">Ctrl + S</kbd>
+                            </div>
+                            <div style="color:#a6adc8; font-size:11px; margin-top:4px;">文本编辑状态下静默保存文件回写服务器。</div>
+                        </div>
+                        <div style="background:#252538; padding:10px 12px; border-radius:8px; border:1px solid #313244;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-weight:600; color:#a6e3a1;">智能代码/补全采纳</span>
+                                <kbd style="background:#45475a; color:#f5e0dc; padding:2px 6px; border-radius:4px; font-size:11px; font-family:monospace;">Tab / Enter</kbd>
+                            </div>
+                            <div style="color:#a6adc8; font-size:11px; margin-top:4px;">出现 Cursor 风格灰色补全提示时采纳内容。</div>
+                        </div>
+                        <div style="background:#252538; padding:10px 12px; border-radius:8px; border:1px solid #313244;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-weight:600; color:#a6e3a1;">重命名窗口标签页</span>
+                                <kbd style="background:#45475a; color:#f5e0dc; padding:2px 6px; border-radius:4px; font-size:11px; font-family:monospace;">rename &lt;名称&gt;</kbd>
+                            </div>
+                            <div style="color:#a6adc8; font-size:11px; margin-top:4px;">在终端输入 setname 或 rename 重命名当前标签。</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 功能特色卡片 -->
+                <div>
+                    <div style="color:#89b4fa; font-size:14px; font-weight:600; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+                        <span>🚀</span> 核心功能指南 (Features)
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:10px;">
+                        <div style="background:#252538; padding:12px; border-radius:8px; border:1px solid #313244;">
+                            <div style="font-weight:600; color:#fab387; margin-bottom:4px;">📁 文件传输与右侧浏览器</div>
+                            <div style="color:#a6adc8; font-size:12px; line-height:1.5;">
+                                • 支持点击右上角 <strong>📷 上传/拖拽</strong>、拖拽本地文件到网页任意区域、或 <strong>Ctrl+V</strong> 粘贴上传。<br>
+                                • 上传进度实时显示在右侧文件浏览器面板顶部，支持大文件切片上传。<br>
+                                • 鼠标悬停文件行可点击 <strong>🗑️</strong> 极速删除服务器文件。
+                            </div>
+                        </div>
+                        <div style="background:#252538; padding:12px; border-radius:8px; border:1px solid #313244;">
+                            <div style="font-weight:600; color:#fab387; margin-bottom:4px;">📄 DOCX / XLSX / PDF / 文本 1:1 在线预览编辑</div>
+                            <div style="color:#a6adc8; font-size:12px; line-height:1.5;">
+                                • <strong>Word (docx)</strong>：内置 docx-preview 原生 1:1 排版样式与字体解析。<br>
+                                • <strong>Excel (xlsx)</strong>：内置 SheetJS 自动生成底部工作表 Tab 选项卡预览。<br>
+                                • <strong>文本编辑 (.txt/.py/.sh/.json/.md)</strong>：支持 1:1 像素级行号精确对齐、在线编辑与智能补全。
+                            </div>
+                        </div>
+                        <div style="background:#252538; padding:12px; border-radius:8px; border:1px solid #313244;">
+                            <div style="font-weight:600; color:#fab387; margin-bottom:4px;">💻 Web VS Code IDE & 📁 Web 网盘快速入口</div>
+                            <div style="color:#a6adc8; font-size:12px; line-height:1.5;">
+                                • 点击右上角 <strong>💻 VS Code</strong>：在独立标签页打开全功能远程 Web VS Code IDE（含完整插件市场与编辑器）。<br>
+                                • 点击右上角 <strong>📁 网盘</strong>：在独立标签页打开可视化文件管理器（FileBrowser）。<br>
+                                • 统一默认凭据：账号 <code style="color:#f9e2af; background:#313244; padding:1px 4px; border-radius:3px;">admin</code> / 密码 <code style="color:#f9e2af; background:#313244; padding:1px 4px; border-radius:3px;">gjp</code>。
+                            </div>
+                        </div>
+                        <div style="background:#252538; padding:12px; border-radius:8px; border:1px solid #313244;">
+                            <div style="font-weight:600; color:#fab387; margin-bottom:4px;">🤖 三大命令行 AI 编程助手集成</div>
+                            <div style="color:#a6adc8; font-size:12px; line-height:1.5;">
+                                • 输入 <code style="color:#f9e2af; background:#313244; padding:1px 4px; border-radius:3px;">agy</code>：唤起 Google Antigravity 智能 Agent。<br>
+                                • 输入 <code style="color:#f9e2af; background:#313244; padding:1px 4px; border-radius:3px;">claude</code>：唤起 Anthropic Claude Code Agent。<br>
+                                • 输入 <code style="color:#f9e2af; background:#313244; padding:1px 4px; border-radius:3px;">codex</code>：唤起 OpenAI Codex CLI 编程助手。
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+            <!-- 弹窗 Footer -->
+            <div style="padding:10px 20px; background:#181825; border-top:1px solid #313244; text-align:right;">
+                <button id="help-modal-ok" style="background:#89b4fa; color:#11111b; border:none; padding:6px 20px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;">知道了</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 语音输入浮动面板：无遮罩层，不阻塞终端输入 -->
+    <div id="voice-panel" style="display:none; position:fixed; right:16px; bottom:16px; z-index:99998; width:340px; max-width:calc(100vw - 24px); background:#1e1e2e; border:1px solid #45475a; border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,0.5); flex-direction:column; overflow:hidden;">
+        <!-- 标题栏（可拖动） -->
+        <div id="voice-panel-head" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 9px; background:#181825; cursor:move; user-select:none; touch-action:none;">
+            <div style="display:flex; align-items:center; gap:6px; min-width:0;">
+                <span id="voice-status-icon" style="font-size:15px; flex-shrink:0;">🎤</span>
+                <span id="voice-status-text" style="color:#cdd6f4; font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">语音开发助手</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:2px; flex-shrink:0;">
+                <button id="voice-panel-collapse" title="折叠 / 展开" style="background:none; border:none; color:#a6adc8; font-size:15px; line-height:1; cursor:pointer; padding:3px 7px; border-radius:4px;">−</button>
+                <button id="voice-modal-close" title="关闭并停止录音" style="background:none; border:none; color:#a6adc8; font-size:15px; line-height:1; cursor:pointer; padding:3px 7px; border-radius:4px;">✕</button>
+            </div>
+        </div>
+
+        <div id="voice-panel-body" style="padding:9px; display:flex; flex-direction:column; gap:9px;">
+            <!-- 转写实时显示文本框 -->
+            <textarea id="voice-transcript-text" rows="2" placeholder="说话后，实时转写文本显示在这里…" style="width:100%; box-sizing:border-box; background:#11111b; border:1px solid #313244; border-radius:6px; padding:8px; color:#cdd6f4; font-size:12px; font-family:'JetBrains Mono',monospace; resize:vertical; outline:none; line-height:1.5;"></textarea>
+
+            <!-- 控制选项与按钮 -->
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                <button id="voice-toggle-rec-btn" style="background:#f38ba8; color:#11111b; border:none; padding:5px 10px; border-radius:5px; font-size:11px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:5px; flex-shrink:0;">
+                    <span id="rec-dot" style="display:inline-block; width:7px; height:7px; background:#11111b; border-radius:50%;"></span>
+                    <span id="rec-btn-text">开始录音</span>
+                </button>
+                <label style="color:#a6adc8; font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; user-select:none;" title="停顿后自动发送到终端">
+                    <input type="checkbox" id="voice-auto-send" style="cursor:pointer; margin:0;">
+                    <span>自动发送</span>
+                </label>
+                <select id="voice-engine" title="识别引擎：自动 = 优先浏览器原生，不可用才退到本机 Whisper" style="background:#313244; color:#cdd6f4; border:1px solid #45475a; border-radius:5px; font-size:11px; padding:4px 5px; cursor:pointer; outline:none;">
+                    <option value="auto">自动</option>
+                    <option value="native">原生实时</option>
+                    <option value="server">本机 Whisper</option>
+                </select>
+                <div style="display:flex; align-items:center; gap:4px; margin-left:auto;">
+                    <button id="voice-clear-btn" title="清除文本" style="background:#313244; color:#a6adc8; border:1px solid #45475a; padding:5px 8px; border-radius:5px; font-size:11px; cursor:pointer;">🗑️</button>
+                    <button id="voice-send-btn" style="background:#89b4fa; color:#11111b; border:none; padding:5px 11px; border-radius:5px; font-size:11px; font-weight:600; cursor:pointer;">🚀 发送</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/xterm.js?v=20260729_v3"></script>
+    <script src="/static/js/xterm-addon-fit.js?v=20260729_v3"></script>
+    <script src="/static/js/xterm-addon-web-links.js?v=20260729_v3"></script>
+    <script src="/static/js/sessions.js?v=20260729_v3"></script>
+    <script src="/static/js/jszip.min.js?v=20260729_v3"></script>
+    <script src="/static/js/docx-preview.min.js?v=20260729_v3"></script>
+    <script src="/static/js/xlsx.full.min.js?v=20260729_v3"></script>
+    <script src="/static/js/terminal.js?v=20260729_v3"></script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+shell.example.com {
+    reverse_proxy shellfb:4200
+}

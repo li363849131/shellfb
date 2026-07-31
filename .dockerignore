@@ -1,0 +1,9 @@
+bin/
+*.exe
+.git/
+.gitignore
+*.md
+recordings/
+backend/
+frontend/
+docs/

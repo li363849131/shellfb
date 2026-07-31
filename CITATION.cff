@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+title: ShellFromBrowser
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - name: valorisa
+    alias: valorisa
+repository-code: "https://github.com/valorisa/ShellFromBrowser"
+license: MIT
+date-released: "2026-05-15"
+version: "0.1.0"
+keywords:
+  - terminal
+  - web-terminal
+  - ssh
+  - websocket
+  - go
+  - shellinabox

@@ -1,0 +1,46 @@
+# ShellFromBrowser configuration
+#
+# All settings can be overridden via environment variables (SHELLFB_ prefix)
+# Priority: env var > CLI flag > this file > defaults
+
+server:
+  addr: ":4200"
+
+  # Set a domain to enable automatic TLS via Let's Encrypt.
+  # When set, the server listens on :443 (HTTPS) and :80 (redirect).
+  # The 'addr' field is ignored in auto-TLS mode.
+  domain: ""
+
+  # Directory to cache auto-TLS certificates (default: ~/.shellfb/certs)
+  autocert_dir: ""
+
+  # Manual TLS (cannot be combined with 'domain')
+  tls:
+    cert: ""
+    key: ""
+
+auth:
+  enabled: false
+  jwt_secret: "change-me-to-a-random-string"
+  users:
+    - username: admin
+      # Generate with: shellfb hash-password
+      password_hash: ""
+
+shell:
+  # Leave empty for system default (SHELL on Unix, COMSPEC on Windows)
+  command: ""
+  env:
+    - "TERM=xterm-256color"
+
+sessions:
+  max_per_user: 10
+  idle_timeout: "30m"
+
+ssh:
+  enabled: true
+  known_hosts: "~/.ssh/known_hosts"
+
+recording:
+  enabled: false
+  dir: "./recordings"

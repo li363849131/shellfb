@@ -1,0 +1,6 @@
+bin/
+*.exe
+recordings/
+transfers/
+config.yaml
+.env

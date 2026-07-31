@@ -1,0 +1,37 @@
+# Use this variant when running behind a reverse proxy (Nginx, Caddy, Traefik)
+# that handles TLS termination.
+#
+# Usage: docker compose -f docker-compose.reverse-proxy.yml up -d
+
+services:
+  shellfb:
+    build: .
+    image: valorisa/shellfb:latest
+    container_name: shellfb
+    environment:
+      - SHELLFB_ADDR=:4200
+      - SHELLFB_AUTH_ENABLED=true
+      - SHELLFB_JWT_SECRET=change-me-to-a-random-string
+    volumes:
+      - ./config.yaml:/etc/shellfb/config.yaml:ro
+      - shellfb-recordings:/home/shellfb/recordings
+    expose:
+      - "4200"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    container_name: shellfb-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  shellfb-recordings:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,31 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Go source files
+*.go text diff=golang
+
+# Web assets
+*.js text
+*.css text
+*.html text
+
+# Config
+*.yaml text
+*.yml text
+*.json text
+
+# Documentation
+*.md text
+
+# Binary
+*.exe binary
+*.png binary
+*.jpg binary
+*.gif binary
+
+# Linguist overrides - ensure GitHub detects this as a Go project
+*.js linguist-vendored
+web/static/js/xterm.js linguist-vendored
+web/static/js/xterm-addon-fit.js linguist-vendored
+web/static/js/xterm-addon-web-links.js linguist-vendored
+web/static/css/xterm.css linguist-vendored
