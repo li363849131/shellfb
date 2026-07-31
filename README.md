@@ -23,7 +23,7 @@ A modern, cross-platform terminal emulator written in Go. Spiritual successor to
 | **Browser-based terminal** | Full xterm.js emulation — 256 colors, Unicode, mouse support, clipboard |
 | **Multi-session tabs** | Open multiple terminal sessions in one browser window, switch between them |
 | **Voice input** | Dictate into the terminal — browser Web Speech API, or a local faster-whisper server for offline use |
-| **AI command help** | Describe what you want in plain language; the command is typed into the terminal for you to review and run |
+| **AI command help** | Describe what you want in plain language; the command is typed into the terminal for you to review and run. **UI disabled by default** — see below |
 | **Resilient connection** | Server-side WebSocket ping every 25s plus client auto-reconnect, so idle sessions survive proxy timeouts |
 | **SSH client** | Connect to remote hosts directly from the browser (`user@host:port`) |
 | **Authentication** | JWT-based auth with bcrypt password hashing, configurable per-user |
@@ -246,7 +246,9 @@ Recording requires a secure context. Over plain HTTP the panel opens but `getUse
 
 ### AI: natural language to command
 
-Press `Ctrl+Shift+A` (or click **🤖 AI**), type what you want, and get a command back:
+> **The UI is turned off by default.** Translation quality wasn't good enough to keep the entry points in the interface, so the 🤖 button, the `Ctrl+Shift+A` bar and the voice panel's AI checkbox are all hidden. The server side is intact and still works. To bring the UI back, set `AI_UI_ENABLED = true` near the top of the AI section in `web/static/js/terminal.js`, then rebuild.
+
+Describe what you want and get a command back:
 
 ```
 找出当前目录下最大的三个文件
@@ -255,7 +257,7 @@ Press `Ctrl+Shift+A` (or click **🤖 AI**), type what you want, and get a comma
 
 **The command is only typed into the terminal — you press Enter.** Suggestions that look destructive are highlighted in red and prefixed with a warning. Nothing executes on its own.
 
-Enable it by exporting an Anthropic credential before starting the server:
+The endpoints (`/api/ai/status`, `/api/ai/translate`) need an Anthropic credential in the server's environment:
 
 ```bash
 export ANTHROPIC_AUTH_TOKEN=sk-...        # or ANTHROPIC_API_KEY
@@ -263,7 +265,7 @@ export ANTHROPIC_BASE_URL=https://...     # optional, for a gateway
 export SHELLFB_AI_MODEL=claude-sonnet-5   # optional, default claude-haiku-4-5-20251001
 ```
 
-With no credential the AI controls stay hidden and everything else works normally. Requests are rate limited to 20/min per IP.
+With no credential the endpoints report `enabled:false` and everything else works normally. Requests are rate limited to 20/min per IP.
 
 ### Connection resilience
 

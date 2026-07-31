@@ -42,10 +42,22 @@ MARKER=$(grep -a -n '^__SHELLFB_SRC_ARCHIVE__' deploy/agy/install.sh | cut -d: -
 head -n "$MARKER" deploy/agy/install.sh > /tmp/head.sh
 tar czf /tmp/src.tar.gz --exclude='.git' --exclude='transfers' \
     --exclude='recordings' --exclude='bin' --exclude='config.yaml' \
+    --exclude='deploy/agy' \
     -C "$(dirname "$PWD")" "$(basename "$PWD")"
 cp /tmp/head.sh deploy/agy/install.sh
 base64 -w0 /tmp/src.tar.gz >> deploy/agy/install.sh
 echo >> deploy/agy/install.sh
 ```
 
-打包时源码目录名需为 `shellfb-src`，脚本解压后按这个路径编译。
+两个坑：
+
+1. **`--exclude='deploy/agy'` 不能漏**。这个目录本身就存着上一份 `install.sh` 和 `tar.gz`，不排除的话每打一次包就把上一份嵌进去，体积翻倍（实测漏掉一次：556KB → 1.7MB）。
+2. 打包时源码目录名需为 `shellfb-src`，脚本解压后按这个路径编译。
+
+打完包验证三件事，别只看体积：
+
+```bash
+tail -n +$(( MARKER + 1 )) deploy/agy/install.sh | base64 -d | tar -xz -C /tmp/check
+tar tzf /tmp/src.tar.gz | grep -c 'deploy/agy'   # 必须是 0
+cd /tmp/check/shellfb-src && go build ./...
+```

@@ -366,9 +366,16 @@
     // Enter. That is deliberate: a model can misread an instruction, and an
     // auto-executed `rm` cannot be taken back.
 
+    // Feature flag. Set to true to bring the AI entry points back: the 🤖 button,
+    // the Ctrl+Shift+A bar, and the voice panel's "AI 理解模式" checkbox. Turned
+    // off 2026-07-31 -- the translation quality wasn't good enough to keep in the
+    // UI. The server side (/api/ai/*) is left intact and still works.
+    var AI_UI_ENABLED = false;
+
     var aiAvailable = false;   // server has credentials configured
 
     function aiEnabled() {
+        if (!AI_UI_ENABLED) return false;
         var cb = document.getElementById("voice-ai-mode");
         return aiAvailable && !!(cb && cb.checked);
     }
@@ -468,6 +475,10 @@
         var resultBox = document.getElementById("ai-bar-result");
         var aiRow = document.getElementById("voice-ai-row");
         if (!bar || !input) return;
+
+        // Flag off: leave every AI control hidden and skip the status probe, so
+        // no request is made and no shortcut is bound.
+        if (!AI_UI_ENABLED) return;
 
         // Hide the controls entirely when the server has no API key, rather than
         // offering a button that always errors.
