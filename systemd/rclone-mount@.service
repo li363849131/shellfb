@@ -1,0 +1,48 @@
+[Unit]
+# Templated rclone FUSE mount. Instance name is the mount name, e.g.
+#   systemctl start rclone-mount@gdrive1
+# Per-instance settings live in /etc/rclone-mounts/<instance>.env
+Description=rclone FUSE mount (%i)
+Documentation=https://rclone.org/commands/rclone_mount/
+After=network-online.target
+Wants=network-online.target
+# Without this the mount can be torn down before shellfb/filebrowser stop
+# touching it, which leaves them holding a dead file handle.
+Before=shellfb.service filebrowser.service
+# Rate limiting belongs in [Unit]; systemd ignores these under [Service].
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+[Service]
+Type=notify
+EnvironmentFile=/etc/rclone-mounts/%i.env
+Environment=RCLONE_CONFIG=/root/.config/rclone/rclone.conf
+
+# The mountpoint is held immutable (chattr +i) while unmounted so a dead mount
+# cannot silently absorb writes onto the local disk. mkdir is a no-op when the
+# directory already exists, immutable or not.
+ExecStartPre=/bin/mkdir -p ${MOUNTPOINT}
+ExecStartPre=/bin/mkdir -p ${CACHE_DIR}
+
+ExecStart=/usr/local/bin/rclone mount ${REMOTE} ${MOUNTPOINT} \
+    --config /root/.config/rclone/rclone.conf \
+    --cache-dir ${CACHE_DIR} \
+    --vfs-cache-mode ${VFS_CACHE_MODE} \
+    --vfs-cache-max-size ${VFS_CACHE_MAX_SIZE} \
+    --vfs-cache-max-age ${VFS_CACHE_MAX_AGE} \
+    --dir-cache-time ${DIR_CACHE_TIME} \
+    --poll-interval ${POLL_INTERVAL} \
+    --tpslimit ${TPSLIMIT} \
+    --tpslimit-burst ${TPSLIMIT_BURST} \
+    --umask 022 \
+    --log-file ${LOG_FILE} \
+    --log-level ${LOG_LEVEL} \
+    $EXTRA_FLAGS
+
+ExecStop=/bin/sh -c '/bin/fusermount3 -u ${MOUNTPOINT} || /bin/umount ${MOUNTPOINT} || true'
+
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

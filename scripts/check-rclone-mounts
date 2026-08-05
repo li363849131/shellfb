@@ -1,0 +1,98 @@
+#!/bin/bash
+# Check health of rclone mounts and their visibility to shellfb APIs.
+# Usage: /usr/local/bin/check-rclone-mounts [gdrive1] [gdrive2] ...
+#   With no args, checks all instances that have a .env file in /etc/rclone-mounts/
+
+set -euo pipefail
+
+MOUNTS=("$@")
+if [ ${#MOUNTS[@]} -eq 0 ]; then
+    for f in /etc/rclone-mounts/*.env; do
+        [ -f "$f" ] || continue
+        MOUNTS+=("$(basename "$f" .env)")
+    done
+fi
+
+[ ${#MOUNTS[@]} -eq 0 ] && { echo "No mounts configured in /etc/rclone-mounts/"; exit 1; }
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+ok()   { echo -e "${GREEN}✓${NC} $*"; }
+warn() { echo -e "${YELLOW}⚠${NC} $*"; }
+fail() { echo -e "${RED}✗${NC} $*"; }
+
+any_fail=0
+
+for m in "${MOUNTS[@]}"; do
+    echo "=== $m ==="
+    envfile="/etc/rclone-mounts/$m.env"
+    [ -f "$envfile" ] || { fail "no $envfile"; any_fail=1; continue; }
+
+    # shellcheck disable=SC1090
+    source "$envfile"
+
+    # 1. systemd unit active?
+    if systemctl is-active --quiet "rclone-mount@$m"; then
+        ok "systemd unit active"
+    else
+        fail "systemd unit NOT active (systemctl start rclone-mount@$m)"
+        any_fail=1
+        continue
+    fi
+
+    # 2. mountpoint actually mounted?
+    if mountpoint -q "$MOUNTPOINT" 2>/dev/null; then
+        ok "mountpoint $MOUNTPOINT is mounted"
+    else
+        fail "$MOUNTPOINT not a mountpoint"
+        any_fail=1
+        continue
+    fi
+
+    # 3. can we list it?
+    if ls "$MOUNTPOINT" >/dev/null 2>&1; then
+        count=$(ls -1A "$MOUNTPOINT" 2>/dev/null | wc -l)
+        ok "ls $MOUNTPOINT → $count entries"
+    else
+        fail "cannot ls $MOUNTPOINT"
+        any_fail=1
+        continue
+    fi
+
+    # 4. shellfb API sees it? (requires shellfb running + auth, so optional)
+    if systemctl is-active --quiet shellfb && [ -x /usr/local/libexec/shellfb-mktoken ]; then
+        token=$(/usr/local/libexec/shellfb-mktoken 2>/dev/null || true)
+        if [ -n "$token" ]; then
+            relpath="${MOUNTPOINT#/root/}"
+            resp=$(curl -s -w "%{http_code}" -o /dev/null "http://127.0.0.1:30009/api/files?dir=$relpath&token=$token" 2>/dev/null || echo "000")
+            if [ "$resp" = "200" ]; then
+                ok "shellfb API can list $relpath"
+            else
+                warn "shellfb API returned HTTP $resp for $relpath"
+            fi
+        else
+            warn "could not mint token, skipping API check"
+        fi
+    else
+        warn "shellfb not running or mktoken missing, skipping API check"
+    fi
+
+    # 5. log file exists and not ancient?
+    if [ -f "$LOG_FILE" ]; then
+        age_min=$(( ($(date +%s) - $(stat -c %Y "$LOG_FILE")) / 60 ))
+        if [ $age_min -lt 10 ]; then
+            ok "log $LOG_FILE updated ${age_min}m ago"
+        else
+            warn "log $LOG_FILE is ${age_min}m old (mount may be idle or wedged)"
+        fi
+    else
+        warn "log $LOG_FILE does not exist yet"
+    fi
+
+    echo
+done
+
+exit $any_fail

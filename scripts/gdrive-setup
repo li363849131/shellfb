@@ -1,0 +1,114 @@
+#!/bin/bash
+# Configure one Google Drive remote from an OAuth token obtained on a machine
+# with a browser, then bring up its systemd mount.
+#
+# Usage:
+#   gdrive-setup gd1 '<token-json>'
+#   gdrive-setup gd2 '<token-json>'
+#
+# Get <token-json> by running this on a computer that HAS a browser:
+#   rclone authorize "drive"
+# ...and copying the JSON blob it prints between the ---> and <--- markers.
+
+set -euo pipefail
+
+RCLONE_CONF=/root/.config/rclone/rclone.conf
+export RCLONE_CONFIG="$RCLONE_CONF"
+
+usage() {
+    cat <<'EOF'
+Usage: gdrive-setup <remote-name> '<token-json>'
+       gdrive-setup <remote-name> --token-file <path>
+
+  <remote-name>   gd1 or gd2 (must match REMOTE= in /etc/rclone-mounts/*.env)
+  <token-json>    The full JSON blob from `rclone authorize "drive"`, quoted.
+                  Looks like: {"access_token":"ya29...","token_type":"Bearer",...}
+  --token-file    Read the blob from a file instead. Preferred: keeps the
+                  refresh_token out of argv (visible in `ps`) and shell history.
+
+Example:
+  gdrive-setup gd1 --token-file /root/.config/rclone/.gd1-token
+EOF
+    exit 1
+}
+
+[ $# -eq 2 ] || [ $# -eq 3 ] || usage
+REMOTE_NAME="$1"
+
+if [ "${2:-}" = "--token-file" ]; then
+    [ $# -eq 3 ] || usage
+    [ -r "$3" ] || { echo "ERROR: cannot read token file: $3" >&2; exit 1; }
+    TOKEN="$(cat "$3")"
+else
+    [ $# -eq 2 ] || usage
+    TOKEN="$2"
+fi
+
+# Map remote name -> mount instance by reading the env files, so this stays
+# correct if the mapping is ever changed there.
+INSTANCE=""
+for f in /etc/rclone-mounts/*.env; do
+    [ -f "$f" ] || continue
+    # shellcheck disable=SC1090
+    if grep -qE "^REMOTE=${REMOTE_NAME}:" "$f"; then
+        INSTANCE="$(basename "$f" .env)"
+        break
+    fi
+done
+
+if [ -z "$INSTANCE" ]; then
+    echo "ERROR: no /etc/rclone-mounts/*.env has REMOTE=${REMOTE_NAME}:" >&2
+    echo "Configured remotes:" >&2
+    grep -H '^REMOTE=' /etc/rclone-mounts/*.env >&2 || true
+    exit 1
+fi
+
+# Validate the token is JSON with a refresh_token. Without a refresh_token the
+# mount works for ~1 hour then dies permanently, which is a miserable failure
+# mode to debug later.
+if ! echo "$TOKEN" | python3 -c '
+import json,sys
+try:
+    t = json.load(sys.stdin)
+except Exception as e:
+    sys.exit("not valid JSON: %s" % e)
+if "refresh_token" not in t or not t["refresh_token"]:
+    sys.exit("token has no refresh_token - the mount would stop working in ~1h.\n"
+             "Re-run `rclone authorize \"drive\"` and copy the WHOLE blob.")
+if "access_token" not in t:
+    sys.exit("token has no access_token - is this the right blob?")
+'; then
+    echo "ERROR: token rejected (see above)" >&2
+    exit 1
+fi
+
+echo "==> Creating rclone remote '${REMOTE_NAME}' (mount instance: ${INSTANCE})"
+rclone config delete "$REMOTE_NAME" 2>/dev/null || true
+rclone config create "$REMOTE_NAME" drive \
+    scope=drive \
+    token="$TOKEN" \
+    --non-interactive >/dev/null
+
+chmod 600 "$RCLONE_CONF"
+
+echo "==> Verifying credentials against Google (about: quota check)"
+if ! rclone about "${REMOTE_NAME}:" 2>&1; then
+    echo "ERROR: could not talk to Google Drive with this token." >&2
+    echo "The remote is configured but not working. Check the token and retry." >&2
+    exit 1
+fi
+
+echo "==> Listing top-level entries (first 10)"
+rclone lsd "${REMOTE_NAME}:" 2>&1 | head -10 || true
+
+echo "==> Enabling and starting mount: rclone-mount@${INSTANCE}"
+systemctl enable "rclone-mount@${INSTANCE}" >/dev/null 2>&1 || true
+systemctl restart "rclone-mount@${INSTANCE}"
+sleep 3
+
+echo "==> Health check"
+/usr/local/bin/check-rclone-mounts "$INSTANCE"
+
+echo
+echo "Done. ${REMOTE_NAME}: is mounted and visible in both the preview panel"
+echo "and the 网盘 (FileBrowser) as the folder it is mounted at."
